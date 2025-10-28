@@ -1,0 +1,66 @@
+name: Build AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'electron/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - '.github/workflows/build-appimage.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             libarchive-tools libnss3 libxss1 libxtst6 libasound2             libatk-bridge2.0-0 libgtk-3-0 libdrm2 libgbm1 libfuse2
+
+      - name: Install JS deps (root)
+        run: |
+          corepack enable || true
+          yarn --version || npm i -g yarn
+          yarn install --frozen-lockfile || yarn install
+
+      - name: Build web app (if script exists)
+        run: |
+          if yarn -s run | grep -q '^build$'; then
+            yarn build
+          else
+            echo "No root build script found; skipping."
+          fi
+
+      - name: Install Electron deps + build AppImage
+        shell: bash
+        run: |
+          set -e
+          if [ -d electron ]; then
+            pushd electron
+            yarn install --frozen-lockfile || yarn install
+            if yarn -s run | grep -q '^build$'; then
+              yarn build || true
+            fi
+            npx electron-builder --linux AppImage
+            echo "OUT_DIR=$(pwd)/dist" >> $GITHUB_ENV
+            popd
+          else
+            npx electron-builder --linux AppImage
+            echo "OUT_DIR=$(pwd)/dist" >> $GITHUB_ENV
+          fi
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AirGap-Vault-AppImage
+          path: ${{ env.OUT_DIR }}/*.AppImage
